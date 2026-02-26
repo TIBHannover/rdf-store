@@ -22,7 +22,7 @@ var livelinessEndpoint = "/healthz"
 // init configures CORS and base routes for the API router.
 func init() {
 	corsConfig := cors.New(cors.Config{
-		AllowOrigins:     base.AllowedOrigins,
+		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type"},
 		ExposeHeaders:    []string{"Content-Length", "Location"},

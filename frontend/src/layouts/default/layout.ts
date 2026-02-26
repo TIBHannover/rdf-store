@@ -1,6 +1,7 @@
 import { css, html, LitElement } from "lit"
 import { customElement } from "lit/decorators.js"
 import { BACKEND_URL } from "../../constants"
+import { i18n } from "../../i18n"
 
 const style = document.createElement('style')
 style.innerText = `:root { --rokit-primary-color: #008877; }`
@@ -55,7 +56,7 @@ export class Footer extends LitElement {
         </div>
         <div class="legal-info">
             <span class="spacer"></span>
-            <rokit-button text href="${BACKEND_URL}/">API documentation</rokit-button>
+            <rokit-button text dense href="${BACKEND_URL}/">${i18n['api_documentation']}</rokit-button>
         </div>
         `
     }

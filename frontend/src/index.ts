@@ -255,7 +255,7 @@ export class App extends LitElement {
                                     ${hit.label?.length ? hit.label.join(', ') : hit.id}
                                 </div>
                                 <div>${i18n['shape']}: ${hit.shape?.length ? (i18n[hit.shape[0]] ? i18n[hit.shape[0]] : hit.shape[0]) : 'No profile'}</div>
-                                ${!hit.lastModified ? nothing : html`<div>Last modified: ${new Date(hit.lastModified).toDateString()}</div>`}
+                                ${!hit.lastModified ? nothing : html`<div>${i18n['last_modified']}: ${new Date(hit.lastModified).toDateString()}</div>`}
                             </div>`
                         )}
                         </div>

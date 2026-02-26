@@ -39,6 +39,12 @@ const appLabels: Record<string, Literal[]> = {
     'click_hit_to_view' : [ DataFactory.literal('Click on a search result to display here', 'en'), DataFactory.literal('Suchergebnis zur Anzeige auswählen', 'de') ],
     'graph_view' : [ DataFactory.literal('Graph view', 'en'), DataFactory.literal('Graphanzeige', 'de') ],
     'detail_view' : [ DataFactory.literal('Detail view', 'en'), DataFactory.literal('Detailanzeige', 'de') ],
+    'last_modified' : [ DataFactory.literal('Last modified', 'en'), DataFactory.literal('Zuletzt geändert', 'de') ],
+    'api_documentation' : [ DataFactory.literal('API documentation', 'en'), DataFactory.literal('API Dokumentation', 'de') ],
+}
+
+export function registerLabel(key: string, literals: Literal[]) {
+    i18n[key] = findBestMatchingLiteral(literals)
 }
 
 export async function fetchLabels(ids: string[], surroundWithBrackets = false, prependColon = false) {
