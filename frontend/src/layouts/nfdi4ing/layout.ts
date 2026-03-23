@@ -11,7 +11,7 @@ document.head.appendChild(style)
 
 registerLabel('sub_heading', [ DataFactory.literal('Your portal to the NFDI4ING Knowledge Graph', 'en'), DataFactory.literal('Ihr Portal zum NFDI4ING Wissensgraph', 'de') ])
 registerLabel('service_provided_by', [ DataFactory.literal('This service is provided by University and State Library Darmstadt', 'en'), DataFactory.literal('Dieser Dienst wird von der Universitäts- und Landesbibliothek Darmstadt bereitgestellt', 'de') ])
-registerLabel('dfg_hint', [ DataFactory.literal('NFDI4ING is supported by DFG under project number', 'en'), DataFactory.literal('NFDI4ING wird gefördert durch die Deutsche Forschungsgemeinschaft (DFG) - Projektnummer', 'de') ])
+registerLabel('dfg_hint', [ DataFactory.literal('NFDI4ING is supported by DFG under project number', 'en'), DataFactory.literal('NFDI4ING wird gefördert durch die DFG unter Projektnummer', 'de') ])
 
 @customElement('layout-header')
 export class Header extends LitElement {
@@ -58,7 +58,7 @@ export class Footer extends LitElement {
     }
     @media (min-width: 768px) {
         .logos { align-items: flex-end; }
-        .logos > :last-child { display: flex; flex-direction: column; justify-content: flex-end; }
+        .logos > :last-child > div { display: flex; justify-content: flex-end; }
     }
     `
 
