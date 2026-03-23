@@ -132,7 +132,6 @@ export class App extends LitElement {
     }
 
     filterChanged(fromPager = false) {
-        console.log(this.shadowRoot?.querySelector('#main'))
         this.shadowRoot?.querySelector('#main')?.classList.add('loading')
         clearTimeout(this.debounceTimeout)
         this.debounceTimeout = setTimeout(async() => {
