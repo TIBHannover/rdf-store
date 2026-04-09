@@ -67,9 +67,24 @@ export class RdfGraph extends LitElement {
     rdf = ''
 
     quads: Quad[] = []
+    private currentZoom?: d3.ZoomBehavior<SVGSVGElement, unknown>
 
     @query('#info-pane')
     infopane!: HTMLElement
+
+    // Public zoom controls — called by parent viewer via querySelector
+    zoomIn() {
+        const svg = this.shadowRoot?.querySelector('#mount svg') as SVGSVGElement | null
+        if (svg && this.currentZoom) d3.select(svg).call(this.currentZoom.scaleBy, 1.3)
+    }
+    zoomOut() {
+        const svg = this.shadowRoot?.querySelector('#mount svg') as SVGSVGElement | null
+        if (svg && this.currentZoom) d3.select(svg).call(this.currentZoom.scaleBy, 1 / 1.3)
+    }
+    resetZoom() {
+        const svg = this.shadowRoot?.querySelector('#mount svg') as SVGSVGElement | null
+        if (svg) fitToView(svg as any)
+    }
 
     showInfoPane = (node: Node, pinned: boolean) => {
         const pane = this.infopane
@@ -205,6 +220,7 @@ export class RdfGraph extends LitElement {
         const scene = svg.append("g").attr("id", "scene")
         const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.3, 1.3]).on("zoom", event => scene.attr("transform", event.transform))
         svg.call(zoom as any)
+        this.currentZoom = zoom
 
         // arrow heads
         svg.append("defs").selectAll("marker")

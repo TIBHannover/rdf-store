@@ -15,8 +15,9 @@ export class ProfileFacet extends Facet {
 
     @property()
     values: { value: string | number, docCount: number }[] = []
-    @property()
-    selectedValue = ''
+    /** Multi-select: all currently active profile IRIs */
+    @property({ attribute: false })
+    selectedValues: string[] = []
     @query('#select')
     select!: RokitSelect
     solrMaxAggregations: number
@@ -24,12 +25,6 @@ export class ProfileFacet extends Facet {
     constructor(solrMaxAggregations: number) {
         super('shape')
         this.solrMaxAggregations = solrMaxAggregations
-    }
-
-    onChange() {
-        this.selectedValue = this.select.value
-        this.active = this.selectedValue.length > 0
-        this.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
     updateValues(aggs: Record<string, AggregationFacet>) {
@@ -63,20 +58,17 @@ export class ProfileFacet extends Facet {
     }
 
     applyFilterQuery(filter: string[]) {
-        const val = this.selectedValue.replace(/:/, '\\:')
-        filter.push(`+shape:${val}`)
+        if (!this.active || this.selectedValues.length === 0) return
+        if (this.selectedValues.length === 1) {
+            const val = this.selectedValues[0].replace(/:/, '\\:')
+            filter.push(`+shape:${val}`)
+        } else {
+            const vals = this.selectedValues.map(v => v.replace(/:/, '\\:')).join(' OR ')
+            filter.push(`+shape:(${vals})`)
+        }
     }
 
     render() {
-        return html`
-            <rokit-select id="select" value="${this.selectedValue}" title="${this.title}" label="${this.label}" @change="${() => this.onChange()}" clearable>
-                <span class="material-icons icon" slot="prefix">list</span>
-                <ul>
-                ${this.values.map((v) => html`
-                    <li data-value="${v.value}">${i18n[v.value] || v.value}<span class="facet-count" part="facet-count" data-count="${v.docCount}"></span></li>
-                `)}
-                </ul>
-            </rokit-select>
-        ` 
+        return html``
     }
 }

@@ -4,6 +4,7 @@ import '@ulb-darmstadt/shacl-form/plugins/leaflet.js'
 import { BACKEND_URL } from './constants'
 import { globalStyles } from './styles'
 import './graph'
+import { RdfGraph } from './graph'
 import { i18n } from './i18n'
 import { showSnackbarMessage } from '@ro-kit/ui-widgets'
 import { ShaclForm } from '@ulb-darmstadt/shacl-form'
@@ -14,82 +15,159 @@ import { resourceLinkProvider } from './editor'
 export class Viewer extends LitElement {
     static styles = [globalStyles, css`
         :host {
-            position: relative;
-            background: #fff;
             display: flex;
             flex-direction: column;
             flex: 1;
             overflow: hidden;
+            background: #fcf8f9;
         }
-        .main {
+
+        /* Padded wrapper around the white card */
+        .exploration-panel {
+            flex: 1;
+            padding: 20px;
             display: flex;
             flex-direction: column;
-            flex-grow: 1;
             overflow: hidden;
+            min-height: 0;
         }
-        .main.detail-view {
-            overflow-y: auto;
-        }
-        .header {
+
+        /* White rounded card — holds graph or detail content */
+        .exploration-card {
+            flex: 1;
+            background: white;
+            border-radius: 16px;
+            border: 1px solid #e4e2e5;
+            box-shadow: 0 2px 12px rgba(50,50,53,0.06);
+            position: relative;
+            overflow: hidden;
             display: flex;
-            align-items: center;
-            border-bottom: 1px solid #E5E7EB;
-            padding: 0 16px;
-            background: #fff;
-            flex-shrink: 0;
-            min-height: 44px;
+            flex-direction: column;
+            min-height: 0;
         }
-        .tabs { display: flex; align-items: flex-end; gap: 0; flex: 1; height: 100%; }
-        .tab-btn {
-            display: inline-flex;
-            align-items: center;
-            padding: 12px 16px 10px;
-            border: none;
-            background: transparent;
-            font-size: 13px;
-            font-family: "Roboto", sans-serif;
-            color: #6B7280;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -1px;
-            transition: color 0.15s, border-color 0.15s;
-            white-space: nowrap;
-        }
-        .tab-btn:hover { color: #374151; }
-        .tab-btn.active { color: #2563EB; border-bottom-color: #2563EB; font-weight: 500; }
-        .spacer { flex-grow: 1; }
-        .header-actions { display: flex; align-items: center; gap: 4px; }
-        .action-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 5px 10px;
-            border: 1px solid #E5E7EB;
-            border-radius: 6px;
-            background: #fff;
-            font-size: 12px;
-            font-family: "Roboto", sans-serif;
-            color: #374151;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        .action-btn:hover { background: #F9FAFB; }
-        .action-btn .material-icons { font-size: 15px; }
-        .action-btn-danger { color: #DC2626; border-color: #FECACA; }
-        .action-btn-danger:hover { background: #FEF2F2; }
-        shacl-form, rdf-graph { flex-grow: 1; --shacl-bg: transparent; }
-        .placeholder {
+
+        /* Graph fills the card */
+        rdf-graph { flex: 1; --shacl-bg: transparent; }
+
+        /* Floating button groups */
+        .graph-controls {
+            position: absolute;
+            bottom: 16px;
+            right: 16px;
             display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-grow: 1;
-            color: #9CA3AF;
-            font-size: 14px;
             flex-direction: column;
             gap: 8px;
+            z-index: 10;
         }
-        .placeholder .material-icons { font-size: 36px; color: #D1D5DB; }
-        #delete-button { --rokit-light-background-color: #FEE; color: #F00; }
+        .detail-controls {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 20;
+        }
+        .edit-btns-right {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            display: flex;
+            gap: 8px;
+            z-index: 20;
+        }
+        .edit-btns-left {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 20;
+        }
+
+        /* Icon-only floating button */
+        .ctrl-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            transition: all 0.12s;
+            padding: 0;
+            font-family: inherit;
+        }
+        .ctrl-btn:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.16); transform: translateY(-1px); }
+        .ctrl-btn:active { transform: translateY(0); }
+        .ctrl-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+        .ctrl-btn .material-icons { font-size: 20px; }
+        .ctrl-btn-primary { background: #005db5; color: #f6f7ff; }
+        .ctrl-btn-primary:hover { background: #0052a0; }
+        .ctrl-btn-white { background: white; color: #5f5f61; border: 1px solid #e4e2e5; }
+        .ctrl-btn-white:hover { color: #323235; background: #f6f3f4; }
+        .ctrl-btn-danger { background: white; color: #dc2626; border: 1px solid #fecaca; }
+        .ctrl-btn-danger:hover { background: #fef2f2; }
+
+        /* Text + icon buttons for Save / Cancel */
+        .text-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 40px;
+            padding: 0 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.12s;
+            border: none;
+        }
+        .text-btn:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.15); transform: translateY(-1px); }
+        .text-btn:active { transform: translateY(0); }
+        .text-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+        .text-btn .material-icons { font-size: 16px; }
+        .text-btn-primary { background: #005db5; color: #f6f7ff; }
+        .text-btn-primary:hover { background: #0052a0; }
+        .text-btn-ghost { background: white; color: #5f5f61; border: 1px solid #e4e2e5; }
+        .text-btn-ghost:hover { background: #f6f3f4; color: #323235; }
+
+        /* Scrollable detail form inside card */
+        .detail-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .detail-scroll::-webkit-scrollbar { display: none; }
+        shacl-form { --shacl-bg: transparent; }
+
+        /* Placeholder when no resource is selected */
+        .placeholder {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            flex: 1;
+            gap: 14px;
+            color: #b3b1b4;
+        }
+        .placeholder-icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: #f0edef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .placeholder-icon .material-icons { font-size: 36px; color: #b3b1b4; }
+        .placeholder-title { font-size: 15px; font-weight: 700; color: #5f5f61; margin: 0; }
+        .placeholder p { margin: 0; font-size: 13px; text-align: center; max-width: 240px; }
     `]
     @property()
     rdfSubject = ''
@@ -113,11 +191,16 @@ export class Viewer extends LitElement {
     saving = false
     private loadTimeout?: number
 
+    private get graphEl(): RdfGraph | null {
+        return this.shadowRoot?.querySelector('rdf-graph') as RdfGraph | null
+    }
+
     updated(changedProperties: PropertyValues) {
         if ((changedProperties.has('rdfSubject') || changedProperties.has('highlightSubject')) && this.rdfSubject) {
             this.highlightSubject = this.highlightSubject || this.rdfSubject
             this.editMode = false
             this.editable = false
+            this.graphView = true
             this.load()
         }
         if (changedProperties.has('graphView') && !this.graphView) {
@@ -235,51 +318,117 @@ export class Viewer extends LitElement {
     }
 
     render() {
-        return this.rdf ? html`
-            <div class="header">
-            ${this.editMode ? html`
-                <div class="tabs">
-                    <button class="action-btn action-btn-danger" @click="${this.delete}" ?disabled="${this.saving}">
-                        <span class="material-icons">delete</span>${i18n['delete']}
-                    </button>
+        if (!this.rdf) {
+            return html`
+                <div class="placeholder">
+                    <div class="placeholder-icon">
+                        <span class="material-icons">account_tree</span>
+                    </div>
+                    <span class="placeholder-title">Configure Exploration</span>
+                    <p>${i18n['click_hit_to_view'] || 'Select a metadata profile, apply filters, then click a result to explore.'}</p>
                 </div>
-                <div class="spacer"></div>
-                <div class="header-actions">
-                    <button class="action-btn" @click="${() => { this.editMode = false }}" ?disabled="${this.saving}">
-                        ${i18n['cancel']}
-                    </button>
-                    <button class="action-btn" style="background:#2563EB;color:#fff;border-color:#2563EB;" @click="${this.save}" ?disabled="${this.saving}">
-                        <span class="material-icons">cloud_upload</span>${i18n['save']}
-                    </button>
+            `
+        }
+
+        return html`
+            <div class="exploration-panel">
+                <div class="exploration-card">
+                    ${this.graphView ? this.renderGraphView() : this.renderDetailView()}
                 </div>
-            ` : html`
-                <div class="tabs">
-                    <button
-                        class="tab-btn ${this.graphView ? 'active' : ''}"
-                        @click="${() => { this.graphView = true }}"
-                    >${i18n['graph_view'] || 'Graph View'}</button>
-                    <button
-                        class="tab-btn ${!this.graphView ? 'active' : ''}"
-                        @click="${() => { this.graphView = false }}"
-                    >${i18n['detail_view'] || 'Node Detail'}</button>
-                </div>
-                <div class="spacer"></div>
-                <div class="header-actions">
-                    ${!this.editable ? nothing : html`
-                        <button class="action-btn" @click="${() => { this.editMode = true; this.graphView = false }}">
-                            <span class="material-icons">edit</span>${i18n['edit']}
-                        </button>
-                    `}
-                    <button class="action-btn" @click="${() => { this.export() }}">
-                        <span class="material-icons">download</span>${i18n['export'] || 'Export'}
-                    </button>
-                </div>
-            `}
             </div>
-            <div class="main ${this.graphView ? '' : 'detail-view'}">
-            ${this.graphView ? html`
-                <rdf-graph rdfSubject="${this.rdfSubject}" highlightSubject="${this.highlightSubject}" rdf="${this.rdfWithLinked}"></rdf-graph>
-            ` : html`
+        `
+    }
+
+    private renderGraphView() {
+        return html`
+            <rdf-graph
+                rdfSubject="${this.rdfSubject}"
+                highlightSubject="${this.highlightSubject}"
+                rdf="${this.rdfWithLinked}"
+            ></rdf-graph>
+
+            <!-- Floating controls — bottom-right of card, matching demo -->
+            <div class="graph-controls">
+                <button class="ctrl-btn ctrl-btn-primary"
+                    title="${i18n['detail_view'] || 'Node Detail'}"
+                    @click="${() => { this.graphView = false }}">
+                    <span class="material-icons">description</span>
+                </button>
+                <button class="ctrl-btn ctrl-btn-white" title="Zoom in"
+                    @click="${() => this.graphEl?.zoomIn()}">
+                    <span class="material-icons">add</span>
+                </button>
+                <button class="ctrl-btn ctrl-btn-white" title="Zoom out"
+                    @click="${() => this.graphEl?.zoomOut()}">
+                    <span class="material-icons">remove</span>
+                </button>
+                <button class="ctrl-btn ctrl-btn-white" title="Reset view"
+                    @click="${() => this.graphEl?.resetZoom()}">
+                    <span class="material-icons">refresh</span>
+                </button>
+            </div>
+        `
+    }
+
+    private renderDetailView() {
+        if (this.editMode) {
+            return html`
+                <!-- Delete — top-left -->
+                <div class="edit-btns-left">
+                    <button class="ctrl-btn ctrl-btn-danger" title="${i18n['delete'] || 'Delete'}"
+                        @click="${this.delete}" ?disabled="${this.saving}">
+                        <span class="material-icons">delete</span>
+                    </button>
+                </div>
+                <!-- Cancel / Save — top-right -->
+                <div class="edit-btns-right">
+                    <button class="text-btn text-btn-ghost"
+                        @click="${() => { this.editMode = false }}" ?disabled="${this.saving}">
+                        ${i18n['cancel'] || 'Cancel'}
+                    </button>
+                    <button class="text-btn text-btn-primary"
+                        @click="${this.save}" ?disabled="${this.saving}">
+                        <span class="material-icons">cloud_upload</span>
+                        ${i18n['save'] || 'Save'}
+                    </button>
+                </div>
+                <div class="detail-scroll">
+                    <shacl-form
+                        id="form"
+                        data-values="${this.rdf}"
+                        data-values-subject="${this.rdfSubject}"
+                        data-values-namespace="${this.rdfNamespace}"
+                        data-proxy="${BACKEND_URL}/rdfproxy?url="
+                        data-hierarchy-colors
+                        data-show-root-shape-label
+                    ></shacl-form>
+                </div>
+            `
+        }
+
+        return html`
+            <!-- Floating controls — top-right: graph toggle, edit, export -->
+            <div class="detail-controls">
+                <button class="ctrl-btn ctrl-btn-primary"
+                    title="${i18n['graph_view'] || 'Graph View'}"
+                    @click="${() => { this.graphView = true }}">
+                    <span class="material-icons">hub</span>
+                </button>
+                ${!this.editable ? nothing : html`
+                    <button class="ctrl-btn ctrl-btn-white"
+                        title="${i18n['edit'] || 'Edit'}"
+                        @click="${() => { this.editMode = true }}">
+                        <span class="material-icons">edit</span>
+                    </button>
+                `}
+                <button class="ctrl-btn ctrl-btn-white"
+                    title="${i18n['export'] || 'Export'}"
+                    @click="${() => { this.export() }}">
+                    <span class="material-icons">download</span>
+                </button>
+            </div>
+            <!-- Scrollable detail content -->
+            <div class="detail-scroll">
                 <shacl-form
                     id="form"
                     data-values="${this.rdf}"
@@ -287,15 +436,9 @@ export class Viewer extends LitElement {
                     data-values-namespace="${this.rdfNamespace}"
                     data-proxy="${BACKEND_URL}/rdfproxy?url="
                     data-hierarchy-colors
-                    ?data-view=${!this.editMode}
+                    data-view
                     data-show-root-shape-label
                 ></shacl-form>
-            `}
-            </div>
-        ` : html`
-            <div class="placeholder">
-                <span class="material-icons">account_tree</span>
-                ${i18n['click_hit_to_view'] || 'Select a result to view details'}
             </div>
         `
     }

@@ -36,6 +36,14 @@ export type Config = {
     rdfNamespace: string
 }
 
+/**
+ * Mirror of Go's CleanStringForSolr: lowercase + replace [\/*?"<>|#:.\- ] with _.
+ * Used to map a raw profile IRI to its Solr field-name prefix key in this.facets.facets.
+ */
+function cleanForSolr(s: string): string {
+    return s.toLowerCase().replace(/[/*?"<>|#:.\- ]/g, '_')
+}
+
 @customElement('rdf-store')
 export class App extends LitElement {
     static styles = [unsafeCSS(styles), globalStyles]
@@ -54,22 +62,27 @@ export class App extends LitElement {
 
     @state() filterModalOpen = false
     @state() sidebarCollapsed = false
+    @state() resultsCollapsed = false
     @state() profileSearch = ''
-    @state() resultsSearch = ''
-    @state() selectedProfile = ''
+    /** IRIs of all currently selected profiles (multi-select) */
+    @state() selectedProfiles: string[] = []
 
     debounceTimeout: ReturnType<typeof setTimeout> | undefined
 
     handleLocationChange = () => {
         // Restore profile selection from URL query param (handles back/forward)
         if (this.facets) {
-            const profileFromUrl = new URL(window.location.href).searchParams.get('profile') || ''
-            if (profileFromUrl !== this.selectedProfile) {
+            const profilesFromUrl = new URL(window.location.href).searchParams.get('profiles')
+                ?.split(',').filter(Boolean) ?? []
+            const same =
+                profilesFromUrl.length === this.selectedProfiles.length &&
+                profilesFromUrl.every(p => this.selectedProfiles.includes(p))
+            if (!same) {
                 const profileFacet = this.getProfileFacet()
                 if (profileFacet) {
-                    this.selectedProfile = profileFromUrl
-                    profileFacet.selectedValue = profileFromUrl
-                    profileFacet.active = !!profileFromUrl
+                    this.selectedProfiles = profilesFromUrl
+                    profileFacet.selectedValues = profilesFromUrl
+                    profileFacet.active = profilesFromUrl.length > 0
                     this.filterChanged()
                 }
             }
@@ -81,7 +94,6 @@ export class App extends LitElement {
             const id = window.location.pathname.substring(index + 10)
             if (id && this.config) {
                 this.viewRdfSubject = this.config.rdfNamespace + id
-                // Clear sub-highlight so the active card is determined by viewRdfSubject
                 this.viewHiglightSubject = undefined
             }
         } else {
@@ -101,6 +113,7 @@ export class App extends LitElement {
     }
 
     viewResource(subject: string | SearchDocument | null) {
+        const currentUrl = new URL(window.location.href)
         let path = APP_PATH
         if (subject) {
             path += 'resource/'
@@ -110,6 +123,11 @@ export class App extends LitElement {
                 path += subject._root_.replace(this.config?.rdfNamespace ?? '', '')
                 this.viewHiglightSubject = subject.id
             }
+        }
+        // Always preserve the profiles query param so handleLocationChange doesn't reset selection
+        const profiles = currentUrl.searchParams.get('profiles')
+        if (profiles) {
+            path += '?' + new URLSearchParams({ profiles }).toString()
         }
         history.pushState('', '', path)
         this.handleLocationChange()
@@ -124,13 +142,14 @@ export class App extends LitElement {
             await fetchLabels(this.config.profiles, true)
             this.facets = await initFacets(this.config.index, this.config.solrMaxAggregations)
 
-            // Restore profile from URL on page load (e.g. bookmarked URL or reload)
-            const profileFromUrl = new URL(window.location.href).searchParams.get('profile') || ''
-            if (profileFromUrl) {
+            // Restore profiles from URL on page load
+            const profilesFromUrl = new URL(window.location.href).searchParams.get('profiles')
+                ?.split(',').filter(Boolean) ?? []
+            if (profilesFromUrl.length > 0) {
                 const profileFacet = this.getProfileFacet()
                 if (profileFacet) {
-                    this.selectedProfile = profileFromUrl
-                    profileFacet.selectedValue = profileFromUrl
+                    this.selectedProfiles = profilesFromUrl
+                    profileFacet.selectedValues = profilesFromUrl
                     profileFacet.active = true
                 }
             }
@@ -226,44 +245,44 @@ export class App extends LitElement {
     private selectProfile(profileValue: string) {
         const profileFacet = this.getProfileFacet()
         if (!profileFacet) return
-        const next = profileValue === this.selectedProfile ? '' : profileValue
-        this.selectedProfile = next
-        profileFacet.selectedValue = next
-        profileFacet.active = !!next
+
+        const isSelected = this.selectedProfiles.includes(profileValue)
+        const next = isSelected
+            ? this.selectedProfiles.filter(p => p !== profileValue)
+            : [...this.selectedProfiles, profileValue]
+
+        this.selectedProfiles = next
+        profileFacet.selectedValues = next
+        profileFacet.active = next.length > 0
         this.offset = 0
 
-        // Push profile into URL so back/forward restores it
+        // Push profiles into URL so back/forward restores them
         const url = new URL(window.location.href)
-        if (next) {
-            url.searchParams.set('profile', next)
+        if (next.length > 0) {
+            url.searchParams.set('profiles', next.join(','))
         } else {
-            url.searchParams.delete('profile')
+            url.searchParams.delete('profiles')
         }
         history.pushState('', '', url.toString())
 
-        this.filterChanged()
-    }
-
-    private resetAllFilters() {
-        if (!this.facets) return
-        for (const profile of Object.keys(this.facets.facets)) {
-            for (const facet of this.facets.facets[profile]) {
-                facet.active = false
-                if (facet instanceof KeywordFacet) facet.selectedValue = ''
-                if (facet instanceof NumberRangeFacet) {
-                    facet.value = undefined
-                    facet.lastSelectedValue = undefined
-                }
+        // Auto-open filter modal when a NEW profile is added (not removed).
+        // Use cleanForSolr to match the key used in this.facets.facets (same as Go backend).
+        if (!isSelected) {
+            const cleanedKey = cleanForSolr(profileValue)
+            const profileFacets = this.facets?.facets[cleanedKey] ?? []
+            if (profileFacets.some(f => !(f instanceof ProfileFacet))) {
+                this.filterModalOpen = true
             }
         }
-        this.selectedProfile = ''
-        this.searchTerm = ''
-        this.resultsSearch = ''
-        this.offset = 0
+
         this.filterChanged()
     }
 
-    // Resets only the applied facet filters (chips), keeping profile and search term intact
+    private removeSelectedProfile(profileValue: string) {
+        this.selectProfile(profileValue) // selectProfile toggles, so calling it on a selected profile removes it
+    }
+
+    // Resets only the applied facet filters (chips), keeping profile selection and search term intact
     private resetFacetFilters() {
         if (!this.facets) return
         for (const profile of Object.keys(this.facets.facets)) {
@@ -278,37 +297,232 @@ export class App extends LitElement {
             }
         }
         this.offset = 0
+        this.requestUpdate()
         this.filterChanged()
     }
 
-    private getActiveFilterChips(): string[] {
-        const chips: string[] = []
+    // Returns active filter chips (non-profile facets) with facet reference for per-chip removal
+    private getActiveFilterChips(): { category: string; label: string; facet: Facet }[] {
+        const chips: { category: string; label: string; facet: Facet }[] = []
         if (!this.facets) return chips
         for (const profile of Object.keys(this.facets.facets)) {
             for (const facet of this.facets.facets[profile]) {
                 if (!facet.active) continue
-                if (facet instanceof ProfileFacet) continue // profile shown in sidebar
+                if (facet instanceof ProfileFacet) continue
                 if (facet instanceof KeywordFacet && facet.selectedValue) {
-                    chips.push(i18n[String(facet.selectedValue)] || String(facet.selectedValue))
+                    chips.push({
+                        category: facet.label || facet.indexFieldWithoutDatatype,
+                        label: i18n[String(facet.selectedValue)] || String(facet.selectedValue),
+                        facet,
+                    })
                 } else if (facet instanceof NumberRangeFacet && facet.value) {
-                    chips.push(`${facet.value[0]}-${facet.value[1]}`)
+                    chips.push({
+                        category: facet.label || facet.indexFieldWithoutDatatype,
+                        label: `${facet.value[0]} – ${facet.value[1]}`,
+                        facet,
+                    })
                 }
             }
         }
         return chips
     }
 
+    // Removes only the single filter for the given facet
+    private removeFacetFilter(facet: Facet) {
+        if (facet instanceof KeywordFacet) {
+            facet.selectedValue = ''
+        } else if (facet instanceof NumberRangeFacet) {
+            facet.value = undefined
+            facet.lastSelectedValue = undefined
+        }
+        facet.active = false
+        this.offset = 0
+        this.requestUpdate()   // force App re-render immediately (facet state lives outside App)
+        this.filterChanged()
+    }
+
     private getModalFacets(): Facet[] {
         if (!this.facets) return []
-        const profileKey = this.selectedProfile || ''
-        const profileFacets = this.facets.facets[profileKey] ?? []
-        if (profileFacets.length > 0) {
-            return profileFacets.filter(f => f.valid && !(f instanceof ProfileFacet))
+        // Gather facets for all selected profiles (union, deduplicated by indexField)
+        if (this.selectedProfiles.length > 0) {
+            const result: Facet[] = []
+            const seen = new Set<string>()
+            for (const profileIri of this.selectedProfiles) {
+                const cleanedKey = cleanForSolr(profileIri)
+                const profileFacets = this.facets.facets[cleanedKey] ?? []
+                for (const f of profileFacets) {
+                    if (!(f instanceof ProfileFacet) && !seen.has(f.indexField)) {
+                        seen.add(f.indexField)
+                        result.push(f)
+                    }
+                }
+            }
+            if (result.length > 0) return result
         }
-        // fallback: all non-profile facets across all profiles
+        // Fallback: all non-profile facets that have values
         return Object.values(this.facets.facets)
             .flat()
             .filter(f => f.valid && !(f instanceof ProfileFacet))
+    }
+
+    private renderSidebar(allProfiles: { value: string | number; docCount: number }[]) {
+        const filteredProfiles = this.profileSearch
+            ? allProfiles.filter(p =>
+                  (i18n[String(p.value)] || String(p.value))
+                      .toLowerCase()
+                      .includes(this.profileSearch.toLowerCase())
+              )
+            : allProfiles
+
+        if (this.sidebarCollapsed) {
+            return html`
+                <div class="collapsed-strip">
+                    <button class="strip-toggle" title="Expand sidebar"
+                        @click="${() => { this.sidebarCollapsed = false }}">
+                        <span class="material-icons">keyboard_double_arrow_right</span>
+                    </button>
+                    <span class="strip-center-label">Profiles</span>
+                </div>
+            `
+        }
+
+        return html`
+            <div class="sidebar-top">
+                <div class="sidebar-search-box">
+                    <span class="material-icons">search</span>
+                    <input
+                        type="text"
+                        placeholder="Search profiles…"
+                        .value="${this.profileSearch}"
+                        @input="${(e: Event) => { this.profileSearch = (e.target as HTMLInputElement).value }}"
+                    >
+                </div>
+                <button class="sidebar-collapse-btn" title="Collapse sidebar"
+                    @click="${() => { this.sidebarCollapsed = true }}">
+                    <span class="material-icons">keyboard_double_arrow_left</span>
+                </button>
+            </div>
+
+            ${this.selectedProfiles.length > 0 ? html`
+                <div class="selected-profiles-area">
+                    <span class="sidebar-section-label" style="padding: 8px 16px 6px; display: block;">Selected</span>
+                    <div class="selected-profile-chips">
+                        ${this.selectedProfiles.map(iri => html`
+                            <span class="selected-profile-chip">
+                                <span class="material-icons selected-profile-icon">description</span>
+                                <span class="selected-profile-name">${i18n[iri] || iri}</span>
+                                <button class="chip-remove selected-chip-remove"
+                                    title="Remove profile"
+                                    @click="${(e: Event) => { e.stopPropagation(); this.removeSelectedProfile(iri) }}">
+                                    <span class="material-icons">close</span>
+                                </button>
+                            </span>
+                        `)}
+                    </div>
+                </div>
+            ` : nothing}
+
+            <h3 class="sidebar-section-label">Metadata Profiles</h3>
+            <div class="profile-list">
+                ${filteredProfiles.map(p => html`
+                    <button
+                        class="profile-item ${this.selectedProfiles.includes(String(p.value)) ? 'active' : ''}"
+                        @click="${() => this.selectProfile(String(p.value))}"
+                    >
+                        <span class="material-icons profile-icon">description</span>
+                        <span class="profile-name">${i18n[String(p.value)] || p.value}</span>
+                        ${this.selectedProfiles.includes(String(p.value)) ? html`
+                            <span class="material-icons profile-check">check</span>
+                        ` : nothing}
+                    </button>
+                `)}
+            </div>
+        `
+    }
+
+    private renderResults(filteredHits: SearchDocument[]) {
+        if (this.resultsCollapsed) {
+            return html`
+                <div class="collapsed-strip">
+                    <button class="strip-toggle" title="Expand results"
+                        @click="${() => { this.resultsCollapsed = false }}">
+                        <span class="material-icons">keyboard_double_arrow_right</span>
+                    </button>
+                    <span class="strip-center-label">Results</span>
+                </div>
+            `
+        }
+
+        return html`
+            <div class="results-header">
+                <h2>${i18n['results'] ? i18n['results'].split(' ')[0] : 'Results'}</h2>
+                <button class="results-collapse-btn" title="Collapse results"
+                    @click="${() => { this.resultsCollapsed = true }}">
+                    <span class="material-icons">keyboard_double_arrow_left</span>
+                </button>
+            </div>
+            <div class="fulltext-search">
+                <span class="material-icons">search</span>
+                <input
+                    type="text"
+                    placeholder="${i18n['fulltextsearch'] || 'Search metadata…'}"
+                    .value="${this.searchTerm}"
+                    @input="${(e: Event) => {
+                        this.searchTerm = (e.target as HTMLInputElement).value
+                        this.filterChanged()
+                    }}"
+                >
+            </div>
+            <!-- Edit Filters button only — chips are in column 3 -->
+            <div class="results-filter-row">
+                <button class="edit-filters-btn" @click="${() => { this.filterModalOpen = true }}">
+                    <span class="material-icons">tune</span>
+                    ${i18n['edit_filters'] || 'Edit Filters'}
+                </button>
+            </div>
+            <div class="results-count">${this.totalHits} ${i18n['results'] || 'results'}</div>
+            <div class="result-cards">
+                ${filteredHits.length === 0 && this.totalHits === 0 ? html`
+                    <div class="no-results">${i18n['noresults'] || 'No results found'}</div>
+                ` : filteredHits.map(hit => html`
+                    <button
+                        class="result-card ${(hit.id === this.viewHiglightSubject || (!this.viewHiglightSubject && hit.id === this.viewRdfSubject)) ? 'active' : ''}"
+                        @click="${() => this.viewResource(hit)}"
+                    >
+                        <div class="result-title">${hit.label?.length ? hit.label.join(', ') : hit.id}</div>
+                        <div class="result-meta">
+                            ${i18n['shape'] || 'Profile'}:
+                            <span>${hit.shape?.length ? (i18n[hit.shape[0]] || hit.shape[0]) : 'No profile'}</span>
+                        </div>
+                        ${hit.lastModified ? html`
+                            <div class="result-meta">
+                                ${i18n['last_modified'] || 'Last modified'}:
+                                <span>${new Date(hit.lastModified).toDateString()}</span>
+                            </div>
+                        ` : nothing}
+                    </button>
+                `)}
+                ${this.totalHits > this.limit ? html`
+                    <div class="pager">
+                        ${map(
+                            this.getPagerItems(Math.ceil(this.totalHits / this.limit), Math.floor(this.offset / this.limit) + 1),
+                            item => item === 'ellipsis'
+                                ? html`<span class="ellipsis">…</span>`
+                                : html`
+                                    <rokit-button
+                                        ?primary="${this.offset === this.limit * ((item as number) - 1)}"
+                                        disabled="${this.offset === this.limit * ((item as number) - 1) || nothing}"
+                                        @click="${() => {
+                                            this.offset = this.limit * ((item as number) - 1)
+                                            this.filterChanged(true)
+                                        }}"
+                                    >${item}</rokit-button>
+                                `
+                        )}
+                    </div>
+                ` : nothing}
+            </div>
+        `
     }
 
     render() {
@@ -316,21 +530,11 @@ export class App extends LitElement {
 
         const profileFacet = this.getProfileFacet()
         const allProfiles = profileFacet?.values ?? []
-        const filteredProfiles = this.profileSearch
-            ? allProfiles.filter(p => (i18n[String(p.value)] || String(p.value)).toLowerCase().includes(this.profileSearch.toLowerCase()))
-            : allProfiles
-
-        const filteredHits = this.resultsSearch
-            ? this.searchHits.filter(h => (h.label?.join(' ') || h.id).toLowerCase().includes(this.resultsSearch.toLowerCase()))
-            : this.searchHits
-
         const activeChips = this.getActiveFilterChips()
         const modalFacets = this.getModalFacets()
 
         return html`
-            <layout-header
-                @reset-filters="${this.resetAllFilters}"
-            >
+            <layout-header @reset-filters="${() => {}}">
                 <div id="header-buttons">
                     ${!this.config.authWriteAccess ? nothing : html`
                         <rokit-button primary @click="${() => this.openEditor()}">
@@ -339,7 +543,7 @@ export class App extends LitElement {
                     `}
                     ${!this.config.authEnabled || this.config.authUser ? nothing : html`
                         <rokit-button primary href="${APP_PATH}oauth2/sign_in">
-                            <span class="material-icons icon">login</span>${i18n['sign_in']}
+                            <span class="material-icons">login</span>${i18n['sign_in']}
                         </rokit-button>
                     `}
                     ${!this.config.authEnabled || !this.config.authUser ? nothing : html`
@@ -353,109 +557,41 @@ export class App extends LitElement {
             <div id="app">
                 <rokit-progressbar class="progress"></rokit-progressbar>
 
-                <!-- Left sidebar: profile navigation -->
+                <!-- Column 1: Metadata Profiles sidebar -->
                 <aside id="sidebar" class="${this.sidebarCollapsed ? 'collapsed' : ''}">
-                    <div class="sidebar-search">
-                        <span class="material-icons">search</span>
-                        <input
-                            type="text"
-                            placeholder="${i18n['fulltextsearch'] || 'Search across metadata'}"
-                            .value="${this.searchTerm}"
-                            @input="${(e: Event) => {
-                                this.searchTerm = (e.target as HTMLInputElement).value
-                                this.filterChanged()
-                            }}"
-                        >
-                    </div>
-                    <div class="profile-list">
-                        ${filteredProfiles.map(p => html`
-                            <div
-                                class="profile-item ${String(p.value) === this.selectedProfile ? 'active' : ''}"
-                                @click="${() => this.selectProfile(String(p.value))}"
-                            >
-                                <span class="material-icons profile-icon">description</span>
-                                <div>
-                                    <div class="profile-name">${i18n[String(p.value)] || p.value}</div>
-                                </div>
-                            </div>
-                        `)}
-                    </div>
-                    <button
-                        class="collapse-btn"
-                        title="${this.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}"
-                        @click="${() => { this.sidebarCollapsed = !this.sidebarCollapsed }}"
-                    >
-                        <span class="material-icons">${this.sidebarCollapsed ? 'chevron_right' : 'chevron_left'}</span>
-                    </button>
+                    ${this.renderSidebar(allProfiles)}
                 </aside>
 
-                <!-- Middle: results list -->
-                <div id="results-col">
-                    <div class="results-header">
-                        <h2>${i18n['results'] ? i18n['results'].split(' ')[0] : 'Results'}</h2>
-                    </div>
-                    <div class="results-count">${this.totalHits} results found</div>
-                    <div class="results-search">
-                        <span class="material-icons">search</span>
-                        <input
-                            type="text"
-                            placeholder="Search results..."
-                            .value="${this.resultsSearch}"
-                            @input="${(e: Event) => { this.resultsSearch = (e.target as HTMLInputElement).value }}"
-                        >
-                    </div>
-                    <div class="result-cards">
-                        ${filteredHits.length === 0 && this.totalHits === 0 ? html`
-                            <div class="no-results">${i18n['noresults'] || 'No results found'}</div>
-                        ` : filteredHits.map(hit => html`
-                            <div
-                                class="result-card ${(hit.id === this.viewHiglightSubject || (!this.viewHiglightSubject && hit.id === this.viewRdfSubject)) ? 'active' : ''}"
-                                @click="${() => this.viewResource(hit)}"
-                            >
-                                <div class="result-title">${hit.label?.length ? hit.label.join(', ') : hit.id}</div>
-                                <div class="result-meta">${i18n['shape'] || 'Profile'}: ${hit.shape?.length ? (i18n[hit.shape[0]] || hit.shape[0]) : 'No profile'}</div>
-                                ${hit.lastModified ? html`<div class="result-meta">${i18n['last_modified'] || 'Last modified'}: ${new Date(hit.lastModified).toDateString()}</div>` : nothing}
-                            </div>
-                        `)}
-                        ${this.totalHits > this.limit ? html`
-                            <div class="pager">
-                                ${map(
-                                    this.getPagerItems(Math.ceil(this.totalHits / this.limit), Math.floor(this.offset / this.limit) + 1),
-                                    item => item === 'ellipsis'
-                                        ? html`<span class="ellipsis">…</span>`
-                                        : html`
-                                            <rokit-button
-                                                ?primary="${this.offset === this.limit * ((item as number) - 1)}"
-                                                disabled="${this.offset === this.limit * ((item as number) - 1) || nothing}"
-                                                @click="${() => {
-                                                    this.offset = this.limit * ((item as number) - 1)
-                                                    this.filterChanged(true)
-                                                }}"
-                                            >${item}</rokit-button>
-                                        `
-                                )}
-                            </div>
-                        ` : nothing}
-                    </div>
+                <!-- Column 2: Results list -->
+                <div id="results-col" class="${this.resultsCollapsed ? 'collapsed' : ''}">
+                    ${this.renderResults(this.searchHits)}
                 </div>
 
-                <!-- Right: content area -->
+                <!-- Column 3: Exploration / content area -->
                 <div id="content-col">
-                    <div class="filter-bar">
-                        <div class="filter-chips">
-                            ${activeChips.map(chip => html`<span class="filter-chip">${chip}</span>`)}
-                        </div>
-                        ${activeChips.length > 0 ? html`
+                    <!-- Applied filter chips — shown only when filters are active -->
+                    ${activeChips.length > 0 ? html`
+                        <div class="content-filter-bar">
+                            <span class="filter-bar-label">Filters:</span>
+                            <div class="filter-chips">
+                                ${activeChips.map(chip => html`
+                                    <span class="filter-chip">
+                                        <span class="chip-category">${chip.category}:</span>
+                                        ${chip.label}
+                                        <button class="chip-remove" title="Remove this filter"
+                                            @click="${() => this.removeFacetFilter(chip.facet)}">
+                                            <span class="material-icons">close</span>
+                                        </button>
+                                    </span>
+                                `)}
+                            </div>
                             <button class="reset-filters-btn" @click="${() => this.resetFacetFilters()}">
                                 <span class="material-icons">restart_alt</span>
-                                Reset Filters
+                                Reset all
                             </button>
-                        ` : nothing}
-                        <button class="edit-filters-btn" @click="${() => { this.filterModalOpen = true }}">
-                            <span class="material-icons">tune</span>
-                            ${i18n['edit_filters'] || 'Edit Filters'}
-                        </button>
-                    </div>
+                        </div>
+                    ` : nothing}
+
                     <div id="viewer-wrap">
                         <rdf-viewer
                             rdfSubject="${this.viewRdfSubject}"
@@ -467,7 +603,7 @@ export class App extends LitElement {
                     </div>
                 </div>
 
-                <!-- Hidden facets container — keeps facets in DOM for updateValues/queries to work -->
+                <!-- Hidden facets container — keeps facets in DOM for query logic -->
                 <div id="facets-hidden">
                     ${this.facets ? Object.values(this.facets.facets).flat().map(f => html`${f}`) : nothing}
                 </div>
@@ -482,7 +618,7 @@ export class App extends LitElement {
                 ></filter-modal>
             ` : nothing}
 
-            <!-- Add resource editor (hidden, opened programmatically) -->
+            <!-- Add resource editor -->
             ${this.config.authWriteAccess ? html`
                 <rdf-editor
                     .profiles="${this.config.profiles}"
