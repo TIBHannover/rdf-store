@@ -333,23 +333,38 @@ export class RdfGraph extends LitElement {
 
 
 function fitToView(svg: SVGSVGElement) {
-    const scene = svg.querySelector<SVGGElement>('#scene')
     const zoom = (svg as any)['zoomBehaviour'] as d3.ZoomBehavior<SVGSVGElement, unknown>
-    if (scene && zoom) {
-        const bbox = scene.getBBox()
-        if (!bbox.width || !bbox.height) {
-            return
-        }
-        const pad = 20
-        const unclampedScale = Math.min((width - 2 * pad) / bbox.width, (height - 2 * pad) / bbox.height)
-        const scale = Math.min(unclampedScale, 1)
-        const transform = d3.zoomIdentity
-            .translate(0, pad - height / 2)
-            .scale(scale)
-            .translate(-(bbox.x + bbox.width / 2), -bbox.y)
+    if (!zoom) return
 
-        d3.select(svg).call(zoom.transform as any, transform)
+    // Use node POSITIONS (not scene.getBBox()) to compute the fit bounds.
+    // getBBox() includes the arc-shaped link paths whose radii can extend far beyond
+    // the node positions, grossly inflating the bounding box and causing over-zoom-out.
+    const nodeEls = Array.from(svg.querySelectorAll<SVGGElement>('#scene .node'))
+    if (!nodeEls.length) return
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const el of nodeEls) {
+        const m = el.getAttribute('transform')?.match(/translate\(([^,]+),\s*([^)]+)\)/)
+        if (m) {
+            const x = parseFloat(m[1]), y = parseFloat(m[2])
+            if (x < minX) minX = x; if (y < minY) minY = y
+            if (x > maxX) maxX = x; if (y > maxY) maxY = y
+        }
     }
+    if (!isFinite(minX)) return
+
+    const pad = 72  // viewBox units — enough margin for node labels
+    const nW = Math.max(maxX - minX, 1)
+    const nH = Math.max(maxY - minY, 1)
+    const scale = Math.min(
+        (width - 2 * pad) / nW,
+        (height - 2 * pad) / nH,
+        1
+    )
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    // Center the node cluster at the viewBox origin (0,0) which is the SVG center
+    d3.select(svg).call(zoom.transform as any, d3.zoomIdentity.scale(scale).translate(-cx, -cy))
 }
 
 function linkArc(d: Edge) {

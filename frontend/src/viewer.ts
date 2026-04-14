@@ -362,9 +362,9 @@ export class Viewer extends LitElement {
                     @click="${() => this.graphEl?.zoomOut()}">
                     <span class="material-icons">remove</span>
                 </button>
-                <button class="ctrl-btn ctrl-btn-white" title="Reset view"
+                <button class="ctrl-btn ctrl-btn-white" title="Fit to screen"
                     @click="${() => this.graphEl?.resetZoom()}">
-                    <span class="material-icons">refresh</span>
+                    <span class="material-icons">fit_screen</span>
                 </button>
             </div>
         `

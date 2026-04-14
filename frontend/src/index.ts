@@ -12,7 +12,7 @@ import { showSnackbarMessage } from '@ro-kit/ui-widgets'
 import { initFacets } from './facets'
 import { Facet } from './facets/base'
 import { ProfileFacet } from './facets/profile'
-import { search, SearchDocument } from './solr'
+import { search, SearchDocument, AggregationFacet } from './solr'
 import { fetchLabels, i18n } from './i18n'
 import { Editor } from './editor'
 import { map } from 'lit/directives/map.js'
@@ -67,6 +67,10 @@ export class App extends LitElement {
     @state() selectedProfiles: string[] = []
     /** Controls which workflow step is visible */
     @state() workflowStep: 'profile' | 'explore' = 'profile'
+    /** Unfiltered profile doc counts cached from the first Solr response (no active profile filter) */
+    @state() private cachedProfileCounts: Record<string, number> = {}
+    /** Controls visibility of the manage topics modal */
+    @state() private topicsModalOpen = false
 
     debounceTimeout: ReturnType<typeof setTimeout> | undefined
     private autoAdvanceTimer: ReturnType<typeof setTimeout> | undefined
@@ -226,6 +230,19 @@ export class App extends LitElement {
                 }
                 this.totalHits = searchResult.response.numFound
                 this.searchHits = searchResult.response.docs
+
+                // Cache unfiltered profile doc counts directly from raw Solr response.
+                // Only update when no profile filter is active so the counts reflect the full dataset.
+                if (this.selectedProfiles.length === 0) {
+                    const shapeFacet = searchResult.facets?.['shape'] as AggregationFacet | undefined
+                    if (shapeFacet?.buckets) {
+                        const counts: Record<string, number> = {}
+                        for (const b of shapeFacet.buckets) {
+                            if (typeof b.val === 'string') counts[b.val] = b.count
+                        }
+                        this.cachedProfileCounts = counts
+                    }
+                }
             } catch (e) {
                 console.error(e)
                 showSnackbarMessage({ message: '' + e, ttl: 0, cssClass: 'error' })
@@ -329,10 +346,6 @@ export class App extends LitElement {
         this.filterChanged()
     }
 
-    private removeSelectedProfile(profileValue: string) {
-        this.selectProfile(profileValue)
-    }
-
     private resetFacetFilters() {
         if (!this.facets) return
         for (const profile of Object.keys(this.facets.facets)) {
@@ -395,13 +408,9 @@ export class App extends LitElement {
      * This ensures all profiles are shown even when a filter is active.
      */
     private getLandingProfiles(): { value: string | number; docCount: number }[] {
-        const profileFacet = this.getProfileFacet()
-        const countMap = new Map(
-            profileFacet?.values.map(v => [String(v.value), v.docCount]) ?? []
-        )
         return (this.config?.profiles ?? []).map(iri => ({
             value: iri,
-            docCount: countMap.get(iri) ?? 0,
+            docCount: this.cachedProfileCounts[iri] ?? 0,
         }))
     }
 
@@ -430,74 +439,96 @@ export class App extends LitElement {
     // ─── Step 1: Profile Landing ───────────────────────────────────────────────
 
     private renderProfileLandingStep(allProfiles: { value: string | number; docCount: number }[]) {
-        const filtered = this.profileSearch
-            ? allProfiles.filter(p =>
-                  (i18n[String(p.value)] || String(p.value))
-                      .toLowerCase()
-                      .includes(this.profileSearch.toLowerCase())
-              )
-            : allProfiles
+        const countsLoaded = Object.keys(this.cachedProfileCounts).length > 0
+
+        // Filtering: default = only profiles with resources; search = all matching
+        // Sorting: default = by resource count desc; search = alphabetical
+        const filtered = allProfiles
+            .filter(p => {
+                const label = (i18n[String(p.value)] || String(p.value)).toLowerCase()
+                if (this.profileSearch) return label.includes(this.profileSearch.toLowerCase())
+                // Before counts load show all; after counts load hide empty profiles
+                return !countsLoaded || p.docCount > 0
+            })
+            .sort((a, b) => {
+                if (this.profileSearch) {
+                    return (i18n[String(a.value)] || String(a.value))
+                        .localeCompare(i18n[String(b.value)] || String(b.value))
+                }
+                if (b.docCount !== a.docCount) return (b.docCount as number) - (a.docCount as number)
+                return (i18n[String(a.value)] || String(a.value))
+                    .localeCompare(i18n[String(b.value)] || String(b.value))
+            })
 
         return html`
             <div class="landing-step">
-                <div class="landing-hero">
-                    <h1 class="landing-title">What would you like to explore?</h1>
-                    <p class="landing-subtitle">Select one or more metadata profiles to get started</p>
-                </div>
+                <!-- Scrollable area: hero + search box + card grid -->
+                <div class="landing-scroll">
+                    <div class="landing-hero">
+                        <h1 class="landing-title">What would you like to explore?</h1>
+                        <p class="landing-subtitle">Select one or more topics to get started</p>
+                    </div>
 
-                <div class="landing-search-wrap">
-                    <div class="landing-search-box">
-                        <span class="material-icons">search</span>
-                        <input
-                            type="text"
-                            placeholder="Filter profiles…"
-                            .value="${this.profileSearch}"
-                            @input="${(e: Event) => { this.profileSearch = (e.target as HTMLInputElement).value }}"
-                        >
-                        ${this.profileSearch ? html`
-                            <button class="landing-search-clear"
-                                @click="${() => { this.profileSearch = '' }}">
-                                <span class="material-icons">close</span>
-                            </button>
+                    <div class="landing-search-wrap">
+                        <div class="landing-search-box">
+                            <span class="material-icons">search</span>
+                            <input
+                                type="text"
+                                placeholder="Filter topics…"
+                                .value="${this.profileSearch}"
+                                @input="${(e: Event) => { this.profileSearch = (e.target as HTMLInputElement).value }}"
+                            >
+                            ${this.profileSearch ? html`
+                                <button class="landing-search-clear"
+                                    @click="${() => { this.profileSearch = '' }}">
+                                    <span class="material-icons">close</span>
+                                </button>
+                            ` : nothing}
+                        </div>
+                    </div>
+
+                    <div class="profile-card-grid">
+                        ${filtered.map(p => {
+                            const iri = String(p.value)
+                            const label = i18n[iri] || iri
+                            const isSelected = this.selectedProfiles.includes(iri)
+                            return html`
+                                <button
+                                    class="profile-card ${isSelected ? 'selected' : ''}"
+                                    @click="${() => this.selectProfile(iri)}"
+                                >
+                                    <div class="profile-card-icon-wrap">
+                                        <span class="material-icons profile-card-icon">description</span>
+                                        ${isSelected ? html`
+                                            <span class="profile-card-check">
+                                                <span class="material-icons">check</span>
+                                            </span>
+                                        ` : nothing}
+                                    </div>
+                                    <div class="profile-card-name">${label}</div>
+                                    <div class="profile-card-desc">Explore ${label} resources and metadata</div>
+                                    <div class="profile-card-badge">
+                                        ${p.docCount.toLocaleString()}
+                                        <span class="profile-card-badge-label"> resources</span>
+                                    </div>
+                                </button>
+                            `
+                        })}
+                        ${filtered.length === 0 && countsLoaded ? html`
+                            <div class="landing-no-profiles">
+                                ${this.profileSearch
+                                    ? `No topics match "${this.profileSearch}"`
+                                    : 'No topics with resources found'}
+                            </div>
                         ` : nothing}
                     </div>
                 </div>
 
-                <div class="profile-card-grid">
-                    ${filtered.map(p => {
-                        const iri = String(p.value)
-                        const label = i18n[iri] || iri
-                        const isSelected = this.selectedProfiles.includes(iri)
-                        return html`
-                            <button
-                                class="profile-card ${isSelected ? 'selected' : ''}"
-                                @click="${() => this.selectProfile(iri)}"
-                            >
-                                <div class="profile-card-icon-wrap">
-                                    <span class="material-icons profile-card-icon">description</span>
-                                    ${isSelected ? html`
-                                        <span class="profile-card-check">
-                                            <span class="material-icons">check</span>
-                                        </span>
-                                    ` : nothing}
-                                </div>
-                                <div class="profile-card-name">${label}</div>
-                                <div class="profile-card-badge">
-                                    ${p.docCount.toLocaleString()}
-                                    <span class="profile-card-badge-label"> resources</span>
-                                </div>
-                            </button>
-                        `
-                    })}
-                    ${filtered.length === 0 ? html`
-                        <div class="landing-no-profiles">No profiles match "${this.profileSearch}"</div>
-                    ` : nothing}
-                </div>
-
+                <!-- CTA bar: outside scroll area, always docked at bottom -->
                 ${this.selectedProfiles.length > 0 ? html`
                     <div class="landing-cta-bar">
                         <span class="landing-cta-hint">
-                            ${this.selectedProfiles.length} profile${this.selectedProfiles.length > 1 ? 's' : ''} selected
+                            ${this.selectedProfiles.length} topic${this.selectedProfiles.length > 1 ? 's' : ''} selected
                         </span>
                         <button class="landing-explore-btn" @click="${() => this.advanceToExplore()}">
                             Explore
@@ -516,27 +547,8 @@ export class App extends LitElement {
             <div class="context-bar">
                 <button class="context-back-btn" @click="${() => this.goBackToProfiles()}">
                     <span class="material-icons">arrow_back</span>
-                    <span>Change Profile</span>
+                    <span>Change Topic</span>
                 </button>
-
-                <div class="context-bar-divider"></div>
-
-                <div class="context-profile-chips">
-                    ${this.selectedProfiles.map(iri => html`
-                        <span class="context-profile-chip">
-                            <span class="material-icons">description</span>
-                            <span>${i18n[iri] || iri}</span>
-                            <button class="chip-remove"
-                                title="Remove profile"
-                                @click="${(e: Event) => {
-                                    e.stopPropagation()
-                                    this.removeSelectedProfile(iri)
-                                }}">
-                                <span class="material-icons">close</span>
-                            </button>
-                        </span>
-                    `)}
-                </div>
 
                 <div class="context-bar-divider"></div>
 
@@ -561,7 +573,7 @@ export class App extends LitElement {
 
                 <button class="edit-filters-btn" @click="${() => { this.filterModalOpen = true }}">
                     <span class="material-icons">tune</span>
-                    ${i18n['edit_filters'] || 'Edit Filters'}
+                    Filters
                 </button>
 
                 ${activeChips.length > 0 ? html`
@@ -631,6 +643,31 @@ export class App extends LitElement {
                     <span class="material-icons">keyboard_double_arrow_left</span>
                 </button>
             </div>
+            ${this.selectedProfiles.length > 0 ? html`
+                <div class="results-topics">
+                    ${this.selectedProfiles.length <= 2
+                        ? this.selectedProfiles.map(iri => html`
+                            <span class="results-topic-chip">
+                                <span class="material-icons">description</span>
+                                ${i18n[iri] || iri}
+                                <button class="results-topic-remove"
+                                    title="Remove topic"
+                                    @click="${(e: Event) => { e.stopPropagation(); this.selectProfile(iri) }}">
+                                    <span class="material-icons">close</span>
+                                </button>
+                            </span>
+                        `)
+                        : html`
+                            <button class="manage-topics-btn"
+                                @click="${() => { this.topicsModalOpen = true }}">
+                                <span class="material-icons">layers</span>
+                                ${this.selectedProfiles.length} Topics selected
+                                <span class="material-icons manage-topics-arrow">tune</span>
+                            </button>
+                        `
+                    }
+                </div>
+            ` : nothing}
             <div class="results-count">${this.totalHits} ${i18n['results'] || 'results'}</div>
             <div class="result-cards">
                 ${filteredHits.length === 0 && this.totalHits === 0 ? html`
@@ -672,6 +709,51 @@ export class App extends LitElement {
                         )}
                     </div>
                 ` : nothing}
+            </div>
+        `
+    }
+
+    private renderTopicsModal() {
+        return html`
+            <div class="topics-modal-overlay" @click="${() => { this.topicsModalOpen = false }}">
+                <div class="topics-modal" @click="${(e: Event) => e.stopPropagation()}">
+                    <div class="topics-modal-header">
+                        <span class="topics-modal-title">
+                            <span class="material-icons">layers</span>
+                            Manage Topics
+                        </span>
+                        <button class="topics-modal-close" @click="${() => { this.topicsModalOpen = false }}">
+                            <span class="material-icons">close</span>
+                        </button>
+                    </div>
+                    <div class="topics-modal-body">
+                        <p class="topics-modal-hint">Deselect a topic to remove it from exploration. Removing all topics returns to the topic selection page.</p>
+                        <div class="topics-modal-list">
+                            ${this.selectedProfiles.map(iri => html`
+                                <div class="topics-modal-item">
+                                    <div class="topics-modal-item-info">
+                                        <span class="material-icons">description</span>
+                                        <span class="topics-modal-item-label">${i18n[iri] || iri}</span>
+                                    </div>
+                                    <button class="topics-modal-remove"
+                                        title="Remove this topic"
+                                        @click="${() => {
+                                            this.topicsModalOpen = false
+                                            this.selectProfile(iri)
+                                        }}">
+                                        <span class="material-icons">remove_circle_outline</span>
+                                        Remove
+                                    </button>
+                                </div>
+                            `)}
+                        </div>
+                    </div>
+                    <div class="topics-modal-footer">
+                        <button class="topics-modal-done" @click="${() => { this.topicsModalOpen = false }}">
+                            Done
+                        </button>
+                    </div>
+                </div>
             </div>
         `
     }
@@ -724,6 +806,9 @@ export class App extends LitElement {
                     ${this.facets ? Object.values(this.facets.facets).flat().map(f => html`${f}`) : nothing}
                 </div>
             </div>
+
+            <!-- Topics modal overlay -->
+            ${this.topicsModalOpen ? this.renderTopicsModal() : nothing}
 
             <!-- Filter modal overlay -->
             ${this.filterModalOpen ? html`
