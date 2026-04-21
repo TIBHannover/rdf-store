@@ -44,6 +44,7 @@ function cleanForSolr(s: string): string {
     return s.toLowerCase().replace(/[/*?"<>|#:.\- ]/g, '_')
 }
 
+
 @customElement('rdf-store')
 export class App extends LitElement {
     static styles = [unsafeCSS(styles), globalStyles]
@@ -71,6 +72,8 @@ export class App extends LitElement {
     @state() private cachedProfileCounts: Record<string, number> = {}
     /** Controls visibility of the manage topics modal */
     @state() private topicsModalOpen = false
+    /** Active step index in the "how to navigate" section (0-2) */
+    @state() private howToStep = 0
 
     debounceTimeout: ReturnType<typeof setTimeout> | undefined
     private autoAdvanceTimer: ReturnType<typeof setTimeout> | undefined
@@ -91,6 +94,7 @@ export class App extends LitElement {
         clearTimeout(this.autoAdvanceTimer)
         this.workflowStep = 'profile'
         this.filterModalOpen = false
+        this.resetFacetFilters()
         const url = new URL(window.location.href)
         url.searchParams.delete('profiles')
         history.pushState('', '', url.toString())
@@ -145,6 +149,26 @@ export class App extends LitElement {
     disconnectedCallback() {
         super.disconnectedCallback()
         window.removeEventListener('popstate', this.handleLocationChange)
+    }
+
+    updated(changedProperties: Map<PropertyKey, unknown>) {
+        if (changedProperties.has('workflowStep') || changedProperties.has('howToStep') || changedProperties.has('config')) {
+            this._playHowToVideo()
+        }
+    }
+
+    private _playHowToVideo() {
+        if (this.workflowStep !== 'profile') return
+        const video = this.renderRoot?.querySelector('.how-to-video') as HTMLVideoElement | null
+        if (!video) return
+        video.onended = null
+        video.load()
+        video.play().catch(() => {})
+        video.onended = () => {
+            if (this.workflowStep === 'profile') {
+                this.howToStep = (this.howToStep + 1) % 3
+            }
+        }
     }
 
     viewResource(subject: string | SearchDocument | null) {
@@ -245,7 +269,12 @@ export class App extends LitElement {
                 }
             } catch (e) {
                 console.error(e)
-                showSnackbarMessage({ message: '' + e, ttl: 0, cssClass: 'error' })
+                // Only surface search errors when the user is actively viewing results.
+                // On the profile landing step the search runs only to populate counts,
+                // so a transient Solr error should not alarm the user.
+                if (this.workflowStep === 'explore') {
+                    showSnackbarMessage({ message: '' + e, ttl: 0, cssClass: 'error' })
+                }
             } finally {
                 this.shadowRoot?.querySelector('#app')?.classList.remove('loading')
             }
@@ -438,16 +467,109 @@ export class App extends LitElement {
 
     // ─── Step 1: Profile Landing ───────────────────────────────────────────────
 
+    private renderHowToNavigate() {
+        const STEPS = [
+            {
+                num: '01',
+                title: 'Select topics & explore',
+                body: 'Browse the available topics on this page. Select one or more relevant to your work, then click Explore to enter the dataset navigator.',
+            },
+            {
+                num: '02',
+                title: 'Filter to find your dataset',
+                body: 'Use the topic-aware filter panel to narrow down resources by type, date, organization, or other properties — making it easy to pinpoint the data you need.',
+            },
+            {
+                num: '03',
+                title: 'Explore in graph or detail view',
+                body: 'Select a resource and dive in. Switch between an interactive graph to traverse relationships, or a detailed metadata view for structured inspection.',
+            },
+        ]
+        const STEP_COLORS = ['var(--primary)', '#d97706', '#7c3aed']
+
+        return html`
+            <div class="how-to-section">
+                <div class="how-to-left">
+                    <div class="landing-section-tag">// how to navigate</div>
+                    <h2 class="how-to-title">Three steps to<br>your data</h2>
+                    <a class="skip-to-profiles" href="#profile-tiles"
+                        @click="${(e: Event) => {
+                            e.preventDefault()
+                            this.renderRoot.querySelector('#profile-tiles')?.scrollIntoView({ behavior: 'smooth' })
+                        }}">
+                        Skip to Topics
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <line x1="7" y1="2" x2="7" y2="12"/><polyline points="3,8 7,12 11,8"/>
+                        </svg>
+                    </a>
+
+                    ${STEPS.map((step, i) => {
+                        const active = this.howToStep === i
+                        const color = STEP_COLORS[i]
+                        return html`
+                            <div class="how-to-step-row ${active ? 'active' : ''}"
+                                @click="${() => { this.howToStep = i }}">
+                                <div class="how-to-step-left-col">
+                                    <div class="how-to-step-circle"
+                                        style="${active ? `border-color:${color};background:${color}18;` : ''}">
+                                        <span class="how-to-step-num"
+                                            style="${active ? `color:${color};` : ''}">
+                                            ${step.num}
+                                        </span>
+                                    </div>
+                                    ${i < 2 ? html`<div class="how-to-connector"></div>` : nothing}
+                                </div>
+                                <div class="how-to-step-text" style="${i < 2 ? 'padding-bottom:20px;' : ''}">
+                                    <div class="how-to-step-title"
+                                        style="${active ? 'color:var(--on-surface);' : ''}">${step.title}</div>
+                                    <div class="how-to-step-body">${step.body}</div>
+                                </div>
+                            </div>
+                        `
+                    })}
+                    <div class="how-to-border-bottom"></div>
+                </div>
+
+                <div class="how-to-right">
+                    <div class="how-to-illustration">
+                        <video
+                            class="how-to-video"
+                            src="${['/step1.mp4', '/step2.mp4', '/step3.mp4'][this.howToStep]}"
+                            muted
+                            playsinline
+                            preload="metadata"
+                        ></video>
+                        <div class="how-to-step-indicator"
+                            style="color:${STEP_COLORS[this.howToStep]};">
+                            STEP ${String(this.howToStep + 1).padStart(2, '0')} · ${['SELECT TOPICS', 'FILTER DATA', 'EXPLORE GRAPH'][this.howToStep]}
+                        </div>
+                        <div class="how-to-corner how-to-corner-tl"></div>
+                        <div class="how-to-corner how-to-corner-tr"></div>
+                        <div class="how-to-corner how-to-corner-bl"></div>
+                        <div class="how-to-corner how-to-corner-br"></div>
+                    </div>
+                    <div class="how-to-pills">
+                        ${STEPS.map((step, i) => html`
+                            <button class="how-to-pill ${this.howToStep === i ? 'active' : ''}"
+                                style="${this.howToStep === i ? `border-color:${STEP_COLORS[i]}66;color:${STEP_COLORS[i]};background:${STEP_COLORS[i]}12;` : ''}"
+                                @click="${() => { this.howToStep = i }}">
+                                STEP ${step.num}
+                            </button>
+                        `)}
+                    </div>
+                </div>
+            </div>
+        `
+    }
+
     private renderProfileLandingStep(allProfiles: { value: string | number; docCount: number }[]) {
         const countsLoaded = Object.keys(this.cachedProfileCounts).length > 0
+        const ACCENTS = ['blue', 'amber', 'violet']
 
-        // Filtering: default = only profiles with resources; search = all matching
-        // Sorting: default = by resource count desc; search = alphabetical
         const filtered = allProfiles
             .filter(p => {
                 const label = (i18n[String(p.value)] || String(p.value)).toLowerCase()
                 if (this.profileSearch) return label.includes(this.profileSearch.toLowerCase())
-                // Before counts load show all; after counts load hide empty profiles
                 return !countsLoaded || p.docCount > 0
             })
             .sort((a, b) => {
@@ -462,69 +584,94 @@ export class App extends LitElement {
 
         return html`
             <div class="landing-step">
-                <!-- Scrollable area: hero + search box + card grid -->
                 <div class="landing-scroll">
+
+                    <!-- HERO -->
                     <div class="landing-hero">
-                        <h1 class="landing-title">What would you like to explore?</h1>
-                        <p class="landing-subtitle">Select one or more topics to get started</p>
+                        <h1 class="landing-title">
+                            Explore <em class="hl">engineering data</em><br>
+                            as a connected <em class="hl2">graph</em>
+                        </h1>
+                        <p class="landing-subtitle">
+                            Effortlessly navigate RDF-based knowledge graphs, explore existing content, or contribute new insights with ease. The KGE provides a seamless experience without requiring SPARQL expertise.
+                        </p>
                     </div>
 
-                    <div class="landing-search-wrap">
-                        <div class="landing-search-box">
-                            <span class="material-icons">search</span>
-                            <input
-                                type="text"
-                                placeholder="Filter topics…"
-                                .value="${this.profileSearch}"
-                                @input="${(e: Event) => { this.profileSearch = (e.target as HTMLInputElement).value }}"
-                            >
-                            ${this.profileSearch ? html`
-                                <button class="landing-search-clear"
-                                    @click="${() => { this.profileSearch = '' }}">
-                                    <span class="material-icons">close</span>
-                                </button>
+                    <!-- DIVIDER + HOW TO NAVIGATE -->
+                    <div class="landing-divider"></div>
+                    ${this.renderHowToNavigate()}
+                    <div class="landing-divider"></div>
+
+                    <!-- TOPICS SECTION -->
+                    <div class="landing-section">
+                        <div class="landing-section-header">
+                            <div>
+                                <div class="landing-section-tag">// dataset topics</div>
+                                <h2 class="landing-section-title">Available Topics</h2>
+                            </div>
+                            <div class="landing-section-count">${filtered.length} topic${filtered.length !== 1 ? 's' : ''}</div>
+                        </div>
+
+                        <div class="landing-search-wrap">
+                            <div class="landing-search-box">
+                                <span class="material-icons">search</span>
+                                <input
+                                    type="text"
+                                    placeholder="Search topics…"
+                                    .value="${this.profileSearch}"
+                                    @input="${(e: Event) => { this.profileSearch = (e.target as HTMLInputElement).value }}"
+                                >
+                                ${this.profileSearch ? html`
+                                    <button class="landing-search-clear"
+                                        @click="${() => { this.profileSearch = '' }}">
+                                        <span class="material-icons">close</span>
+                                    </button>
+                                ` : nothing}
+                            </div>
+                        </div>
+
+                        <div class="tile-grid" id="profile-tiles">
+                            ${filtered.map((p, idx) => {
+                                const iri = String(p.value)
+                                const label = i18n[iri] || iri
+                                const isSelected = this.selectedProfiles.includes(iri)
+                                const accent = ACCENTS[idx % 3]
+                                return html`
+                                    <button
+                                        class="tile ${isSelected ? 'selected' : ''}"
+                                        data-accent="${accent}"
+                                        @click="${() => this.selectProfile(iri)}"
+                                    >
+                                        <div class="tile-name">${label}</div>
+                                        <div class="tile-desc">Explore ${label} datasets and metadata</div>
+                                        <div class="tile-footer">
+                                            <div class="tile-meta">${p.docCount.toLocaleString()} datasets</div>
+                                            <svg class="tile-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <line x1="4" y1="16" x2="16" y2="4"/>
+                                                <polyline points="8,4 16,4 16,12"/>
+                                            </svg>
+                                        </div>
+                                        ${isSelected ? html`
+                                            <div class="tile-check">
+                                                <span class="material-icons">check</span>
+                                            </div>
+                                        ` : nothing}
+                                    </button>
+                                `
+                            })}
+                            ${filtered.length === 0 && countsLoaded ? html`
+                                <div class="landing-no-profiles">
+                                    ${this.profileSearch
+                                        ? `No topics match "${this.profileSearch}"`
+                                        : 'No topics with datasets found'}
+                                </div>
                             ` : nothing}
                         </div>
                     </div>
 
-                    <div class="profile-card-grid">
-                        ${filtered.map(p => {
-                            const iri = String(p.value)
-                            const label = i18n[iri] || iri
-                            const isSelected = this.selectedProfiles.includes(iri)
-                            return html`
-                                <button
-                                    class="profile-card ${isSelected ? 'selected' : ''}"
-                                    @click="${() => this.selectProfile(iri)}"
-                                >
-                                    <div class="profile-card-icon-wrap">
-                                        <span class="material-icons profile-card-icon">description</span>
-                                        ${isSelected ? html`
-                                            <span class="profile-card-check">
-                                                <span class="material-icons">check</span>
-                                            </span>
-                                        ` : nothing}
-                                    </div>
-                                    <div class="profile-card-name">${label}</div>
-                                    <div class="profile-card-desc">Explore ${label} resources and metadata</div>
-                                    <div class="profile-card-badge">
-                                        ${p.docCount.toLocaleString()}
-                                        <span class="profile-card-badge-label"> resources</span>
-                                    </div>
-                                </button>
-                            `
-                        })}
-                        ${filtered.length === 0 && countsLoaded ? html`
-                            <div class="landing-no-profiles">
-                                ${this.profileSearch
-                                    ? `No topics match "${this.profileSearch}"`
-                                    : 'No topics with resources found'}
-                            </div>
-                        ` : nothing}
-                    </div>
                 </div>
 
-                <!-- CTA bar: outside scroll area, always docked at bottom -->
+                <!-- CTA bar: docked at bottom when ≥1 topic selected -->
                 ${this.selectedProfiles.length > 0 ? html`
                     <div class="landing-cta-bar">
                         <span class="landing-cta-hint">

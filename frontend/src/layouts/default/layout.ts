@@ -54,8 +54,8 @@ export class Header extends LitElement {
 
     render() {
         return html`
-            <div class="logo">R</div>
-            <span class="title">RDF Store</span>
+            <div class="logo">K</div>
+            <span class="title">Knowledge Graph Explorer</span>
             <div class="actions">
                 <slot></slot>
             </div>
