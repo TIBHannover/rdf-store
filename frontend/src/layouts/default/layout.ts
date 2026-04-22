@@ -13,8 +13,8 @@ export class Header extends LitElement {
         align-items: center;
         padding: 0 20px;
         height: 64px;
-        background-color: #fff;
-        border-bottom: 1px solid #e4e2e5;
+        background-color: #1a1f36;
+        border-bottom: 1px solid #2d3354;
         position: sticky;
         top: 0;
         z-index: 100;
@@ -22,40 +22,30 @@ export class Header extends LitElement {
         box-sizing: border-box;
         gap: 12px;
     }
-    .logo {
-        width: 36px;
-        height: 36px;
-        background: #005db5;
-        color: #f6f7ff;
-        border-radius: 8px;
+    .logo-wrap {
+        flex: 1;
         display: flex;
         align-items: center;
-        justify-content: center;
-        font-weight: 700;
-        font-size: 17px;
-        flex-shrink: 0;
-        font-family: "Inter", "Roboto", sans-serif;
-        letter-spacing: -0.5px;
     }
-    .title {
-        font-size: 15px;
-        font-weight: 600;
-        color: #323235;
-        flex: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-family: "Inter", "Roboto", sans-serif;
-        letter-spacing: -0.01em;
+    .logo-img {
+        height: 36px;
+        width: auto;
+        display: block;
+        cursor: pointer;
+        opacity: 1;
+        transition: opacity 0.15s;
     }
+    .logo-img:hover { opacity: 0.8; }
     .actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     ::slotted(#header-buttons) { display: flex; gap: 6px; align-items: center; }
     `
 
     render() {
         return html`
-            <div class="logo">K</div>
-            <span class="title">Knowledge Graph Explorer</span>
+            <div class="logo-wrap">
+                <img class="logo-img" src="/NFDI4ING_Wort-Bildmarke_NEG_RGB-DEh5SvlN.png" alt="NFDI4ING"
+                    @click="${() => this.dispatchEvent(new CustomEvent('go-home', { bubbles: true, composed: true }))}">
+            </div>
             <div class="actions">
                 <slot></slot>
             </div>

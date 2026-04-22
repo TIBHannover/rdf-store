@@ -913,7 +913,7 @@ export class App extends LitElement {
         const modalFacets = this.getModalFacets()
 
         return html`
-            <layout-header @reset-filters="${() => {}}">
+            <layout-header @reset-filters="${() => {}}" @go-home="${() => this.goBackToProfiles()}">
                 <div id="header-buttons">
                     ${!this.config.authWriteAccess ? nothing : html`
                         <rokit-button primary @click="${() => this.openEditor()}">

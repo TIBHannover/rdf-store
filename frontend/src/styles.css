@@ -30,8 +30,8 @@
 layout-header {
     flex-shrink: 0;
     #header-buttons { display: flex; gap: 6px; align-items: center; }
-    #sign-out { color: var(--on-surface-variant); text-decoration: none; font-size: 13px; padding: 6px 8px; }
-    #sign-out:hover { color: var(--on-surface); }
+    #sign-out { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 13px; padding: 6px 8px; }
+    #sign-out:hover { color: #fff; }
 }
 
 /* ── App body ── */
@@ -95,6 +95,7 @@ layout-header {
     flex-direction: column;
     overflow: hidden;
     background: var(--surface);
+    align-items: center;
 }
 
 .landing-scroll {
@@ -105,6 +106,10 @@ layout-header {
     align-items: center;
     -ms-overflow-style: none;
     scrollbar-width: none;
+    width: 100%;
+    max-width: 1366px;
+    will-change: scroll-position;
+    transform: translateZ(0);
 }
 .landing-scroll::-webkit-scrollbar { display: none; }
 
@@ -193,7 +198,7 @@ layout-header {
     gap: 64px;
     align-items: stretch;
     padding: 40px 48px 56px;
-    max-width: 1200px;
+    max-width: 1366px;
     width: 100%;
     box-sizing: border-box;
 }
@@ -350,7 +355,7 @@ layout-header {
     color: var(--outline);
     cursor: pointer;
     border-radius: 6px;
-    transition: all 0.2s;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
     font-family: 'IBM Plex Mono', monospace;
 }
 .how-to-pill:hover { color: var(--on-surface); border-color: var(--outline-variant); }
@@ -358,7 +363,7 @@ layout-header {
 /* ── Topics section ── */
 .landing-section {
     width: 100%;
-    max-width: 1200px;
+    max-width: 1366px;
     padding: 64px 48px 80px;
     box-sizing: border-box;
 }
@@ -880,7 +885,7 @@ layout-header {
     cursor: pointer;
     border: 1px solid transparent;
     border-radius: 12px;
-    transition: all 0.15s;
+    transition: border-color 0.15s, background 0.15s;
     margin-bottom: 10px;
     text-align: left;
     background: white;
@@ -1008,7 +1013,7 @@ rdf-viewer { flex: 1; }
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: all 0.1s;
+    transition: color 0.1s, background 0.1s, border-color 0.1s;
 }
 .edit-filters-btn {
     background: rgba(0, 93, 181, 0.05);
