@@ -10,17 +10,17 @@
     --primary: #005db5;
     --primary-dim: #0052a0;
     --on-primary: #f6f7ff;
-    --surface: #fcf8f9;
-    --surface-container: #f0edef;
-    --surface-container-low: #f6f3f4;
-    --surface-container-high: #eae7ea;
-    --surface-container-highest: #e4e2e5;
-    --on-surface: #323235;
-    --on-surface-variant: #5f5f61;
-    --outline: #7b7a7d;
-    --outline-variant: #b3b1b4;
-    --border: #e4e2e5;
-    --background: #fcf8f9;
+    --surface: #ffffff;
+    --surface-container: #f0f0f0;
+    --surface-container-low: #f6f6f6;
+    --surface-container-high: #e8e8e8;
+    --surface-container-highest: #e0e0e0;
+    --on-surface: #1a1a1a;
+    --on-surface-variant: #5a5a5a;
+    --outline: #7a7a7a;
+    --outline-variant: #b0b0b0;
+    --border: #e0e0e0;
+    --background: #ffffff;
 
     /* Legacy compat */
     --secondary-color: #5d5c78;
