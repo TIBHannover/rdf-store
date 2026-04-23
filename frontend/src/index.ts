@@ -13,7 +13,7 @@ import { initFacets } from './facets'
 import { Facet } from './facets/base'
 import { ProfileFacet } from './facets/profile'
 import { search, SearchDocument, AggregationFacet } from './solr'
-import { fetchLabels, i18n } from './i18n'
+import { fetchLabels, fetchDescriptions, profileDescriptions, i18n } from './i18n'
 import { Editor } from './editor'
 import { map } from 'lit/directives/map.js'
 import { registerPlugin } from '@ulb-darmstadt/shacl-form'
@@ -199,6 +199,7 @@ export class App extends LitElement {
             this.config = await resp.json() as Config
             await this.applyLayout(this.config.layout || 'default')
             await fetchLabels(this.config.profiles, true)
+            await fetchDescriptions(this.config.profiles)
             this.facets = await initFacets(this.config.index, this.config.solrMaxAggregations)
 
             // Restore profiles from URL on page load (deep link support)
@@ -519,7 +520,7 @@ export class App extends LitElement {
                                     </div>
                                     ${i < 2 ? html`<div class="how-to-connector"></div>` : nothing}
                                 </div>
-                                <div class="how-to-step-text" style="${i < 2 ? 'padding-bottom:20px;' : ''}">
+                                <div class="how-to-step-text">
                                     <div class="how-to-step-title"
                                         style="${active ? 'color:var(--on-surface);' : ''}">${step.title}</div>
                                     <div class="how-to-step-body">${step.body}</div>
@@ -634,6 +635,7 @@ export class App extends LitElement {
                             ${filtered.map((p, idx) => {
                                 const iri = String(p.value)
                                 const label = i18n[iri] || iri
+                                const desc = profileDescriptions[iri] || `Explore ${label} datasets and metadata`
                                 const isSelected = this.selectedProfiles.includes(iri)
                                 const accent = ACCENTS[idx % 3]
                                 return html`
@@ -643,7 +645,7 @@ export class App extends LitElement {
                                         @click="${() => this.selectProfile(iri)}"
                                     >
                                         <div class="tile-name">${label}</div>
-                                        <div class="tile-desc">Explore ${label} datasets and metadata</div>
+                                        <div class="tile-desc">${desc}</div>
                                         <div class="tile-footer">
                                             <div class="tile-meta">${p.docCount.toLocaleString()} datasets</div>
                                             <svg class="tile-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -756,9 +758,9 @@ export class App extends LitElement {
                     <div id="content-col">
                         <div id="viewer-wrap">
                             <rdf-viewer
-                                rdfSubject="${this.viewRdfSubject}"
+                                .rdfSubject="${this.viewRdfSubject ?? ''}"
                                 rdfNamespace="${this.config!.rdfNamespace}"
-                                highlightSubject="${this.viewHiglightSubject}"
+                                .highlightSubject="${this.viewHiglightSubject ?? ''}"
                                 .config="${this.config}"
                                 @delete="${() => { this.viewResource(null); this.filterChanged() }}"
                             ></rdf-viewer>

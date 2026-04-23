@@ -28,6 +28,7 @@ var LabelPredicates = map[string]bool{
 	shacl.FOAF_FIRST_NAME.RawValue(): true,
 }
 var labelTargetPredicate = shacl.RDFS_LABEL.String()
+var descriptionTargetPredicate = shacl.DCTERMS_DESCRIPTION.String()
 var labelsQuery = `
 SELECT DISTINCT ?id ?label
 WHERE {
@@ -38,6 +39,16 @@ WHERE {
 }
 `
 var labelsQueryTemplate = template.Must(template.New("listQuery").Funcs(template.FuncMap{}).Parse(labelsQuery))
+var descriptionsQuery = `
+SELECT DISTINCT ?id ?desc
+WHERE {
+  GRAPH ?g {
+	VALUES ?id { {{range .Ids}}{{.}} {{end}} }
+	?id <http://purl.org/dc/terms/description> ?desc .
+  }
+}
+`
+var descriptionsQueryTemplate = template.Must(template.New("descriptionsQuery").Parse(descriptionsQuery))
 
 // GetLabels retrieves preferred labels for IDs in the given language.
 // It returns a map of ID to label and any error encountered.
@@ -90,6 +101,51 @@ func GetLabels(language string, ids []string) (map[string]string, error) {
 	return result, nil
 }
 
+// GetDescriptions retrieves dc:description values for IDs in the given language.
+func GetDescriptions(language string, ids []string) (map[string]string, error) {
+	var result = make(map[string]string)
+	if len(ids) > 0 {
+		languagePrios := []string{language}
+		if len(language) > 2 {
+			languagePrios = append(languagePrios, language[:2])
+		}
+		if language != fallbackLanguage {
+			languagePrios = append(languagePrios, fallbackLanguage)
+		}
+		languagePrios = append(languagePrios, "")
+
+		var query bytes.Buffer
+		if err := descriptionsQueryTemplate.Execute(&query, map[string]any{"Ids": ids}); err != nil {
+			return nil, err
+		}
+		bindings, err := queryDataset(profileDataset, query.String())
+		if err != nil {
+			return nil, err
+		}
+		res, err := sparql.ParseJSON(bytes.NewReader(bindings))
+		if err != nil {
+			return nil, err
+		}
+		currentPrios := make(map[string]int)
+		for _, row := range res.Solutions() {
+			s, okS := row["id"].(rdf.Subject)
+			desc, okO := row["desc"].(rdf.Literal)
+			if !okS || !okO {
+				continue
+			}
+			id := "<" + s.String() + ">"
+			prio := slices.Index(languagePrios, desc.Lang())
+			if prio > -1 {
+				if cur, ok := currentPrios[id]; !ok || prio < cur {
+					result[id] = desc.String()
+					currentPrios[id] = prio
+				}
+			}
+		}
+	}
+	return result, nil
+}
+
 // CheckLabelsExist checks whether labels for a URL were already imported.
 // It returns a boolean flag and any error from the dataset lookup.
 func CheckLabelsExist(url string) (bool, error) {
@@ -105,6 +161,11 @@ func ExtractLabels(id string, graph *rdf2go.Graph, convertShaclProperties bool) 
 		profileLables = findProfileLabels(rdf2go.NewResource(id), graph)
 	}
 	for triple := range graph.IterTriples() {
+		if triple.Predicate.RawValue() == shacl.DCTERMS_DESCRIPTION.RawValue() {
+			if _, ok := triple.Object.(*rdf2go.Literal); ok {
+				fmt.Fprintf(&result, "%s %s %s .\n", triple.Subject.String(), descriptionTargetPredicate, triple.Object.String())
+			}
+		}
 		if _, isLabel := LabelPredicates[triple.Predicate.RawValue()]; isLabel {
 			// check if triple object is a literal
 			if label, ok := triple.Object.(*rdf2go.Literal); ok {

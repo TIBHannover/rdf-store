@@ -45,6 +45,22 @@ const appLabels: Record<string, Literal[]> = {
     'privacy' : [ DataFactory.literal('Privacy Statement', 'en'), DataFactory.literal('Datenschutzerklärung', 'de') ],
 }
 
+export const profileDescriptions: Record<string, string> = {}
+
+export async function fetchDescriptions(ids: string[]) {
+    const formData = new URLSearchParams()
+    for (const id of ids) {
+        formData.append('id', '<' + id + '>')
+    }
+    formData.append('lang', navigator.language)
+    const resp: Record<string, string> = await fetch(
+        `${BACKEND_URL}/descriptions`, { method: 'POST', body: formData }
+    ).then(r => r.json())
+    for (const id of ids) {
+        profileDescriptions[id] = resp['<' + id + '>'] || ''
+    }
+}
+
 export function registerLabel(key: string, literals: Literal[]) {
     i18n[key] = findBestMatchingLiteral(literals)
 }
