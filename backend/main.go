@@ -78,8 +78,8 @@ func serveStaticFiles() func(c *gin.Context) {
 
 	return func(c *gin.Context) {
 		// fallback routes for frontend (everything not starting with API base path)
-		if !strings.HasPrefix(c.Request.RequestURI, api.BasePath) {
-			filename := strings.TrimPrefix(c.Request.RequestURI, "/")
+		if !strings.HasPrefix(c.Request.URL.Path, api.BasePath) {
+			filename := strings.TrimPrefix(c.Request.URL.Path, "/")
 			file, err := frontendFS.Open(filename)
 			headers := make(map[string]string)
 			if err != nil {
@@ -97,7 +97,7 @@ func serveStaticFiles() func(c *gin.Context) {
 			c.DataFromReader(http.StatusOK, stat.Size(), mime.TypeByExtension(filepath.Ext(filename)), file, headers)
 		} else {
 			// fallback routes for swagger UI
-			filename := strings.TrimPrefix(strings.TrimPrefix(c.Request.RequestURI, api.BasePath), "/")
+			filename := strings.TrimPrefix(strings.TrimPrefix(c.Request.URL.Path, api.BasePath), "/")
 			if filename == "" {
 				filename = "index.html"
 			}
